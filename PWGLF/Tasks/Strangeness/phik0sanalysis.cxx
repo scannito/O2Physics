@@ -394,9 +394,9 @@ struct phik0shortanalysis {
       if (QA)
         MCeventHist.fill(HIST("hRecMCEventSelection"), 2); // kNoTimeFrameBorder collisions
       if (cfgiskNoITSROFrameBorder && !collision.selection_bit(aod::evsel::kNoITSROFrameBorder))
-          return false;
+        return false;
       if (QA)
-          MCeventHist.fill(HIST("hRecMCEventSelection"), 3); // kNoITSROFrameBorder collisions (by default not requested by the selection)
+        MCeventHist.fill(HIST("hRecMCEventSelection"), 3); // kNoITSROFrameBorder collisions (by default not requested by the selection)
       if (std::abs(collision.posZ()) > cutzvertex)
         return false;
       if (QA) {
