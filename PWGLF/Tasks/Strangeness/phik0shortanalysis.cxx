@@ -831,7 +831,7 @@ struct Phik0shortanalysis {
       if (std::abs(mcParticle.y()) > cfgYAcceptance)
         continue
 
-      nPhi++;
+          nPhi++;
     }
 
     if (nPhi > 0)
