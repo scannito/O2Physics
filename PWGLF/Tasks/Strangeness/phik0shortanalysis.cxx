@@ -57,6 +57,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <string>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -3483,6 +3484,5 @@ struct Phik0shortanalysis {
 
 WorkflowSpec defineDataProcessing(ConfigContext const& cfgc)
 {
-  return WorkflowSpec{
-    adaptAnalysisTask<Phik0shortanalysis>(cfgc)};
+  return WorkflowSpec{adaptAnalysisTask<Phik0shortanalysis>(cfgc)};
 }
