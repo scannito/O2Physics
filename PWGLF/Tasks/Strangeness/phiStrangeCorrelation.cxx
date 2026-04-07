@@ -354,6 +354,294 @@ struct PhiStrangenessCorrelation {
     return RecoDecay::constrainAngle(phiTrigger - phiAssociated, -o2::constants::math::PIHalf);
   }
 
+  template <ParticleOfInterest POI>
+  struct AssocParticleTraits;
+
+  template <>
+  struct AssocParticleTraits<K0S> {
+    static bool isValid(const auto& task, const auto& k0s)
+    {
+      const bool applyK0sMassCut = (task.analysisMode == kDeltaYvsDeltaPhi) && task.k0sConfigs.selectK0sInSigRegion;
+      const auto& [minMassK0s, maxMassK0s] = task.k0sConfigs.rangeMK0sSignal.value;
+      return !applyK0sMassCut || k0s.inMassRegion(minMassK0s, maxMassK0s);
+    }
+
+    static void fillMassVsMass(auto& task, float mult, const auto& phi, const auto& k0s, float weight, bool isME)
+    {
+      static constexpr int idSE = HIST("phiK0S/h6PhiK0SData");
+      static constexpr int idME = HIST("phiK0S/h6PhiK0SDataME");
+
+      task.histos.fill(isME ? idME : idSE, mult, phi.pt(), k0s.pt(), phi.y() - k0s.y(), phi.m(), k0s.m(), weight);
+    }
+
+    template <unsigned int I>
+    static void fillDeltaYVsDeltaPhi(auto& task, float mult, const auto& phi, const auto& k0s, float weight, bool isME)
+    {
+      static constexpr auto idsSE = std::make_tuple(HIST("phiK0S/h5PhiK0SDataSignal"), HIST("phiK0S/h5PhiK0SDataSideband"));
+      static constexpr auto idsME = std::make_tuple(HIST("phiK0S/h5PhiK0SDataMESignal"), HIST("phiK0S/h5PhiK0SDataMESideband"));
+
+      auto histID = isME ? std::get<I>(idsME) : std::get<I>(idsSE);
+      task.histos.fill(histID, mult, phi.pt(), k0s.pt(), phi.y() - k0s.y(), task.getDeltaPhi(phi.phi(), k0s.phi()), weight);
+    }
+  };
+
+  template <>
+  struct AssocParticleTraits<Pion> {
+    static bool isValid(const auto& task, const auto& pion)
+    {
+      const bool applyPionNSigmaCut = (task.analysisMode == kDeltaYvsDeltaPhi) && task.pionConfigs.selectPionInSigRegion;
+      const float& pidTPCMax = task.pionConfigs.pidTPCMax;
+      const float& pidTOFMax = task.pionConfigs.pidTOFMax;
+      const float& tofPIDThreshold = task.pionConfigs.tofPIDThreshold;
+      return !applyPionNSigmaCut || pion.inNSigmaRegion(pidTPCMax, tofPIDThreshold, pidTOFMax);
+    }
+
+    static void fillMassVsMass(auto& task, float mult, const auto& phi, const auto& pion, float weight, bool isME)
+    {
+      static constexpr int idTPC_SE = HIST("phiPi/h6PhiPiTPCData");
+      static constexpr int idTPC_ME = HIST("phiPi/h6PhiPiTPCDataME");
+      static constexpr int idTOF_SE = HIST("phiPi/h6PhiPiTOFData");
+      static constexpr int idTOF_ME = HIST("phiPi/h6PhiPiTOFDataME");
+
+      task.histos.fill(isME ? idTPC_ME : idTPC_SE, mult, phi.pt(), pion.pt(), phi.y() - pion.y(), phi.m(), pion.nSigmaTPC(), weight);
+      task.histos.fill(isME ? idTOF_ME : idTOF_SE, mult, phi.pt(), pion.pt(), phi.y() - pion.y(), phi.m(), pion.nSigmaTOF(), weight);
+    }
+
+    template <unsigned int I>
+    static void fillDeltaYVsDeltaPhi(auto& task, float mult, const auto& phi, const auto& pion, float weight, bool isME)
+    {
+      static constexpr auto idsSE = std::make_tuple(HIST("phiPi/h5PhiPiDataSignal"), HIST("phiPi/h5PhiPiDataSideband"));
+      static constexpr auto idsME = std::make_tuple(HIST("phiPi/h5PhiPiDataMESignal"), HIST("phiPi/h5PhiPiDataMESideband"));
+
+      auto histID = isME ? std::get<I>(idsME) : std::get<I>(idsSE);
+      task.histos.fill(histID, mult, phi.pt(), pion.pt(), phi.y() - pion.y(), task.getDeltaPhi(phi.phi(), pion.phi()), weight);
+    }
+  };
+
+  template <ParticleOfInterest POI>
+  void processPair(float mult, const auto& phiCand, const auto& assocCand, bool isME)
+  {
+    if (!ParticleTraits<POI>::isValid(assocCand, *this))
+      return;
+
+    float weight = computeWeight(BoundEfficiencyMap(effMaps[Phi], mult, phiCand.pt(), phiCand.y()),
+                                 BoundEfficiencyMap(effMaps[POI], mult, assocCand.pt(), assocCand.y()));
+
+    if (analysisMode == kMassvsMass) {
+      ParticleTraits<POI>::fillMassVsMass(*this, mult, phiCand, assocCand, weight, isME);
+    } else if (analysisMode == kDeltaYvsDeltaPhi) {
+      const std::array<std::pair<float, float>, 2> phiMassRegions = {phiConfigs.rangeMPhiSignal.value, phiConfigs.rangeMPhiSideband.value};
+
+      static_for<0, phiMassRegionLabels.size() - 1>([&](auto i_idx) {
+        constexpr unsigned int i = i_idx.value;
+        if (phiCand.inMassRegion(phiMassRegions[i].first, phiMassRegions[i].second)) {
+          ParticleTraits<POI>::template fillDeltaYVsDeltaPhi<i>(*this, mult, phiCand, assocCand, weight, isME);
+        }
+      });
+    }
+  }
+
+  template <typename TCollision, typename TPhiCands, typename TK0SCands, typename TPionCands>
+  void processPhiAllAssocSE(TCollision const& collision, TPhiCands const& phiCandidates, TK0SCands const& k0sReduced, TPionCands const& pionTracks)
+  {
+    float multiplicity = collision.centFT0M();
+
+    for (const auto& phiCand : phiCandidates) {
+      float weightPhi = computeWeight(BoundEfficiencyMap(effMaps[Phi], multiplicity, phiCand.pt(), phiCand.y()));
+      histos.fill(HIST("phi/h3PhiData"), multiplicity, phiCand.pt(), phiCand.m(), weightPhi);
+
+      for (const auto& k0s : k0sReduced) {
+        processPair<K0S>(multiplicity, phiCand, k0s, false);
+      }
+
+      for (const auto& pion : pionTracks) {
+        processPair<Pion>(multiplicity, phiCand, pion, false);
+      }
+
+      /*static_for<0, phiMassRegionLabels.size() - 1>([&](auto i_idx) {
+        constexpr unsigned int i = i_idx.value;
+
+        const auto& [minMassPhi, maxMassPhi] = phiMassRegions[i];
+        if (!phiCand.inMassRegion(minMassPhi, maxMassPhi))
+          return;
+
+        // Loop over all reduced K0S candidates
+        for (const auto& k0s : k0sReduced) {
+          if (k0sConfigs.selectK0sInSigRegion) {
+            const auto& [minMassK0s, maxMassK0s] = k0sConfigs.rangeMK0sSignal.value;
+            if (!k0s.inMassRegion(minMassK0s, maxMassK0s))
+              continue;
+          }
+
+          float weightPhiK0S = computeWeight(BoundEfficiencyMap(effMaps[Phi], multiplicity, phiCand.pt(), phiCand.y()),
+                                             BoundEfficiencyMap(effMaps[K0S], multiplicity, k0s.pt(), k0s.y()));
+
+          histos.fill(HIST("phiK0S/h5PhiK0SData") + HIST(phiMassRegionLabels[i]), multiplicity, phiCand.pt(), k0s.pt(), phiCand.y() - k0s.y(), getDeltaPhi(phiCand.phi(), k0s.phi()), weightPhiK0S);
+        }
+
+        // Loop over all primary pion candidates
+        for (const auto& pionTrack : pionTracks) {
+          float weightPhiPion = computeWeight(BoundEfficiencyMap(effMaps[Phi], multiplicity, phiCand.pt(), phiCand.y()),
+                                              BoundEfficiencyMap(effMaps[Pion], multiplicity, pionTrack.pt(), pionTrack.y()));
+
+          histos.fill(HIST("phiPi/h5PhiPiData") + HIST(phiMassRegionLabels[i]), multiplicity, phiCand.pt(), pionTrack.pt(), phiCand.y() - pionTrack.y(), getDeltaPhi(phiCand.phi(), pionTrack.phi()), weightPhiPion);
+        }
+      });*/
+    }
+  }
+
+  void processPhiAllAssocSEDataLike(SelCollisions::iterator const& collision, aod::PhimesonCandidatesData const& phiCandidates, aod::K0sReducedCandidatesData const& k0sReduced, aod::PionTracksData const& pionTracks)
+  {
+    processPhiAllAssocSE(collision, phiCandidates, k0sReduced, pionTracks);
+  }
+
+  PROCESS_SWITCH(PhiStrangenessCorrelation, processPhiAllAssocSEDataLike, "Process function for all Phi-Assoc 2D Correlations in Data or MC w/o PDG SE", true);
+
+  void processPhiAllAssocSEMCWithPDG(SimCollisions::iterator const& collision, aod::PhimesonCandidatesMcReco const& phiCandidates, aod::K0sReducedCandidatesMcReco const& k0sReduced, aod::PionTracksMcReco const& pionTracks)
+  {
+    processPhiAllAssocSE(collision, phiCandidates, k0sReduced, pionTracks);
+  }
+
+  PROCESS_SWITCH(PhiStrangenessCorrelation, processPhiAllAssocSEMCWithPDG, "Process function for all Phi-Assoc 2D Correlations in MC with PDG SE", false);
+
+  template <typename TCollision, typename TPhiCands>
+  void processInclusivePhi(TCollision const& collision, TPhiCands const& phiCandidates)
+  {
+    float multiplicity = collision.centFT0M();
+    for (const auto& phiCand : phiCandidates) {
+      float weightPhi = computeWeight(BoundEfficiencyMap(effMaps[Phi], multiplicity, phiCand.pt(), phiCand.y()));
+      histos.fill(HIST("phi/h3PhiData"), multiplicity, phiCand.pt(), phiCand.m(), weightPhi);
+    }
+  }
+
+  void processInclusivePhiDataLike(SelCollisions::iterator const& collision, aod::PhimesonCandidatesData const& phiCandidates)
+  {
+    processInclusivePhi(collision, phiCandidates);
+  }
+
+  PROCESS_SWITCH(PhiStrangenessCorrelation, processInclusivePhiDataLike, "Process function for inclusive Phi in Data or MC w/o PDG", true);
+
+  void processInclusivePhiMCWithPDG(SimCollisions::iterator const& collision, aod::PhimesonCandidatesMcReco const& phiCandidates)
+  {
+    processInclusivePhi(collision, phiCandidates);
+  }
+
+  PROCESS_SWITCH(PhiStrangenessCorrelation, processInclusivePhiMCWithPDG, "Process function for inclusive Phi in MC with PDG", false);
+
+  template <ParticleOfInterest POI, typename TCollision, typename TPhiCands, typename TAssocCands>
+  void processSameEvent(TCollision const& collision, TPhiCands const& phiCandidates, TAssocCands const& assocCandidates)
+  {
+    float multiplicity = collision.centFT0M();
+
+    for (const auto& phiCand : phiCandidates) {
+      float weightPhi = computeWeight(BoundEfficiencyMap(effMaps[Phi], multiplicity, phiCand.pt(), phiCand.y()));
+      histos.fill(HIST("phi/h3PhiData"), multiplicity, phiCand.pt(), phiCand.m(), weightPhi);
+
+      for (const auto& assocCand : assocCandidates) {
+        processPair<POI>(multiplicity, phiCand, assocCand, false);
+      }
+    }
+  }
+
+  void processPhiK0SSEDataLike(SelCollisions::iterator const& collision, aod::PhimesonCandidatesData const& phiCandidates, aod::K0sReducedCandidatesData const& k0sReduced)
+  {
+    processSameEvent<K0S>(collision, phiCandidates, k0sReduced);
+  }
+
+  PROCESS_SWITCH(PhiStrangenessCorrelation, processPhiK0SSEDataLike, "Process function for Phi-K0S SE in Data or MC w/o PDG", true);
+
+  void processPhiK0SSEMCWithPDG(SimCollisions::iterator const& collision, aod::PhimesonCandidatesMcReco const& phiCandidates, aod::K0sReducedCandidatesMcReco const& k0sReduced)
+  {
+    processSameEvent<K0S>(collision, phiCandidates, k0sReduced);
+  }
+
+  PROCESS_SWITCH(PhiStrangenessCorrelation, processPhiK0SSEMCWithPDG, "Process function for Phi-K0S SE in MC with PDG", false);
+
+  void processPhiPionSEDataLike(SelCollisions::iterator const& collision, aod::PhimesonCandidatesData const& phiCandidates, aod::PionTracksData const& pionTracks)
+  {
+    processSameEvent<Pion>(collision, phiCandidates, pionTracks);
+  }
+
+  PROCESS_SWITCH(PhiStrangenessCorrelation, processPhiPionSEDataLike, "Process function for Phi-Pion SE in Data or MC w/o PDG", true);
+
+  void processPhiPionSEMCWithPDG(SimCollisions::iterator const& collision, aod::PhimesonCandidatesMcReco const& phiCandidates, aod::PionTracksMcReco const& pionTracks)
+  {
+    processSameEvent<Pion>(collision, phiCandidates, pionTracks);
+  }
+
+  PROCESS_SWITCH(PhiStrangenessCorrelation, processPhiPionSEMCWithPDG, "Process function for Phi-Pion SE in MC with PDG", false);
+
+  template <ParticleOfInterest POI, typename TCollisions, typename TPhiCands, typename TAssocCands>
+  void processMixedEvent(TCollisions const& collisions, TPhiCands const& phiCandidates, TAssocCands const& assocCandidates)
+  {
+    auto tupleAssoc = std::make_tuple(phiCandidates, assocCandidates);
+    Pair<TCollisions, TPhiCands, TAssocCands, BinningTypeVertexCent> pairME{binningOnVertexAndCent, cfgNoMixedEvents, -1, collisions, tupleAssoc, &cache};
+
+    for (const auto& [c1, phiCands, c2, assocCands] : pairME) {
+      float multiplicity = c1.centFT0M();
+
+      for (const auto& [phiCand, assocCand] : o2::soa::combinations(o2::soa::CombinationsFullIndexPolicy(phiCands, assocCands))) {
+        processPair<POI>(multiplicity, phiCand, assocCand, true);
+      }
+    }
+
+    /*static_for<0, phiMassRegionLabels.size() - 1>([&](auto i_idx) {
+      constexpr unsigned int i = i_idx.value;
+
+      const auto& [minMassPhi, maxMassPhi] = phiMassRegions[i];
+      if (!phiCand.inMassRegion(minMassPhi, maxMassPhi))
+        return;
+
+      if (k0sConfigs.selectK0sInSigRegion) {
+        const auto& [minMassK0s, maxMassK0s] = k0sConfigs.rangeMK0sSignal.value;
+        if (!k0s.inMassRegion(minMassK0s, maxMassK0s))
+          return;
+      }
+
+      float weightPhiK0S = computeWeight(BoundEfficiencyMap(effMaps[Phi], multiplicity, phiCand.pt(), phiCand.y()),
+                                         BoundEfficiencyMap(effMaps[K0S], multiplicity, k0s.pt(), k0s.y()));
+
+      histos.fill(HIST("phiK0S/h5PhiK0SDataME") + HIST(phiMassRegionLabels[i]), multiplicity, phiCand.pt(), k0s.pt(), phiCand.y() - k0s.y(), getDeltaPhi(phiCand.phi(), k0s.phi()), weightPhiK0S);
+    });
+
+    static_for<0, phiMassRegionLabels.size() - 1>([&](auto i_idx) {
+      constexpr unsigned int i = i_idx.value;
+
+      const auto& [minMassPhi, maxMassPhi] = phiMassRegions[i];
+      if (!phiCand.inMassRegion(minMassPhi, maxMassPhi))
+        return;
+
+      float weightPhiPion = computeWeight(BoundEfficiencyMap(effMaps[Phi], multiplicity, phiCand.pt(), phiCand.y()),
+                                          BoundEfficiencyMap(effMaps[Pion], multiplicity, piTrack.pt(), piTrack.y()));
+
+      histos.fill(HIST("phiPi/h5PhiPiDataME") + HIST(phiMassRegionLabels[i]), multiplicity, phiCand.pt(), piTrack.pt(), phiCand.y() - piTrack.y(), getDeltaPhi(phiCand.phi(), piTrack.phi()), weightPhiPion);
+    });*/
+  }
+
+  void processPhiK0SMEDataLike(SelCollisions const& collisions, aod::PhimesonCandidatesData const& phiCandidates, aod::K0sReducedCandidatesData const& k0sReduced)
+  {
+    processMixedEvent<K0S>(collisions, phiCandidates, k0sReduced);
+  }
+  PROCESS_SWITCH(PhiStrangenessCorrelation, processPhiK0SMEDataLike, "Process function for Phi-K0S 2D Correlations in Data or MC w/o PDG ME", false);
+
+  void processPhiK0SMEMCWithPDG(SimCollisions const& collisions, aod::PhimesonCandidatesMcReco const& phiCandidates, aod::K0sReducedCandidatesMcReco const& k0sReduced)
+  {
+    processMixedEvent<K0S>(collisions, phiCandidates, k0sReduced);
+  }
+  PROCESS_SWITCH(PhiStrangenessCorrelation, processPhiK0SMEMCWithPDG, "Process function for Phi-K0S 2D Correlations in MC with PDG ME", false);
+
+  void processPhiPionMEDataLike(SelCollisions const& collisions, aod::PhimesonCandidatesData const& phiCandidates, aod::PionTracksData const& pionTracks)
+  {
+    processMixedEvent<Pion>(collisions, phiCandidates, pionTracks);
+  }
+  PROCESS_SWITCH(PhiStrangenessCorrelation, processPhiPionMEDataLike, "Process function for Phi-Pion 2D Correlations in Data or MC w/o PDG ME", false);
+
+  void processPhiPionMEMCWithPDG(SimCollisions const& collisions, aod::PhimesonCandidatesMcReco const& phiCandidates, aod::PionTracksMcReco const& pionTracks)
+  {
+    processMixedEvent<Pion>(collisions, phiCandidates, pionTracks);
+  }
+  PROCESS_SWITCH(PhiStrangenessCorrelation, processPhiPionMEMCWithPDG, "Process function for Phi-Pion 2D Correlations in MC with PDG ME", false);
+
   template <typename TCollision, typename TPhiCands, typename TK0SCands, typename TPionCands>
   void processPhiK0SPionSE(TCollision const& collision, TPhiCands const& phiCandidates, TK0SCands const& k0sReduced, TPionCands const& pionTracks)
   {
@@ -427,9 +715,6 @@ struct PhiStrangenessCorrelation {
           if (!phiCand.inMassRegion(minMassPhi, maxMassPhi))
             return;
 
-          // auto k0sHistID = HIST("phiK0S/h5PhiK0SData") + HIST(phiMassRegionLabels[i]);
-          // auto piHistID = HIST("phiPi/h5PhiPiData") + HIST(phiMassRegionLabels[i]);
-
           processCorrelations(
             [&](const auto& k0s, float w) {
               histos.fill(std::get<i>(k0sHistID), multiplicity, phiCand.pt(), k0s.pt(), phiCand.y() - k0s.y(), getDeltaPhi(phiCand.phi(), k0s.phi()), w);
@@ -439,36 +724,6 @@ struct PhiStrangenessCorrelation {
             });
         });
       }
-
-      /*static_for<0, phiMassRegionLabels.size() - 1>([&](auto i_idx) {
-        constexpr unsigned int i = i_idx.value;
-
-        const auto& [minMassPhi, maxMassPhi] = phiMassRegions[i];
-        if (!phiCand.inMassRegion(minMassPhi, maxMassPhi))
-          return;
-
-        // Loop over all reduced K0S candidates
-        for (const auto& k0s : k0sReduced) {
-          if (k0sConfigs.selectK0sInSigRegion) {
-            const auto& [minMassK0s, maxMassK0s] = k0sConfigs.rangeMK0sSignal.value;
-            if (!k0s.inMassRegion(minMassK0s, maxMassK0s))
-              continue;
-          }
-
-          float weightPhiK0S = computeWeight(BoundEfficiencyMap(effMaps[Phi], multiplicity, phiCand.pt(), phiCand.y()),
-                                             BoundEfficiencyMap(effMaps[K0S], multiplicity, k0s.pt(), k0s.y()));
-
-          histos.fill(HIST("phiK0S/h5PhiK0SData") + HIST(phiMassRegionLabels[i]), multiplicity, phiCand.pt(), k0s.pt(), phiCand.y() - k0s.y(), getDeltaPhi(phiCand.phi(), k0s.phi()), weightPhiK0S);
-        }
-
-        // Loop over all primary pion candidates
-        for (const auto& pionTrack : pionTracks) {
-          float weightPhiPion = computeWeight(BoundEfficiencyMap(effMaps[Phi], multiplicity, phiCand.pt(), phiCand.y()),
-                                              BoundEfficiencyMap(effMaps[Pion], multiplicity, pionTrack.pt(), pionTrack.y()));
-
-          histos.fill(HIST("phiPi/h5PhiPiData") + HIST(phiMassRegionLabels[i]), multiplicity, phiCand.pt(), pionTrack.pt(), phiCand.y() - pionTrack.y(), getDeltaPhi(phiCand.phi(), pionTrack.phi()), weightPhiPion);
-        }
-      });*/
     }
   }
 
@@ -540,25 +795,6 @@ struct PhiStrangenessCorrelation {
               });
           });
         }
-
-        /*static_for<0, phiMassRegionLabels.size() - 1>([&](auto i_idx) {
-          constexpr unsigned int i = i_idx.value;
-
-          const auto& [minMassPhi, maxMassPhi] = phiMassRegions[i];
-          if (!phiCand.inMassRegion(minMassPhi, maxMassPhi))
-            return;
-
-          if (k0sConfigs.selectK0sInSigRegion) {
-            const auto& [minMassK0s, maxMassK0s] = k0sConfigs.rangeMK0sSignal.value;
-            if (!k0s.inMassRegion(minMassK0s, maxMassK0s))
-              return;
-          }
-
-          float weightPhiK0S = computeWeight(BoundEfficiencyMap(effMaps[Phi], multiplicity, phiCand.pt(), phiCand.y()),
-                                             BoundEfficiencyMap(effMaps[K0S], multiplicity, k0s.pt(), k0s.y()));
-
-          histos.fill(HIST("phiK0S/h5PhiK0SDataME") + HIST(phiMassRegionLabels[i]), multiplicity, phiCand.pt(), k0s.pt(), phiCand.y() - k0s.y(), getDeltaPhi(phiCand.phi(), k0s.phi()), weightPhiK0S);
-        });*/
       }
     }
   }
@@ -635,19 +871,6 @@ struct PhiStrangenessCorrelation {
               });
           });
         }
-
-        /*static_for<0, phiMassRegionLabels.size() - 1>([&](auto i_idx) {
-          constexpr unsigned int i = i_idx.value;
-
-          const auto& [minMassPhi, maxMassPhi] = phiMassRegions[i];
-          if (!phiCand.inMassRegion(minMassPhi, maxMassPhi))
-            return;
-
-          float weightPhiPion = computeWeight(BoundEfficiencyMap(effMaps[Phi], multiplicity, phiCand.pt(), phiCand.y()),
-                                              BoundEfficiencyMap(effMaps[Pion], multiplicity, piTrack.pt(), piTrack.y()));
-
-          histos.fill(HIST("phiPi/h5PhiPiDataME") + HIST(phiMassRegionLabels[i]), multiplicity, phiCand.pt(), piTrack.pt(), phiCand.y() - piTrack.y(), getDeltaPhi(phiCand.phi(), piTrack.phi()), weightPhiPion);
-        });*/
       }
     }
   }
