@@ -273,7 +273,7 @@ struct PhiStrangeCorrelation {
     Configurable<bool> applyEfficiency{"applyEfficiency", false, "Use efficiency for filling histograms"};
     Configurable<bool> useEffInterpolation{"useEffInterpolation", false, "If true, interpolates efficiency map, else uses bin center"};
     Configurable<bool> applyPhiEfficiency{"applyPhiEfficiency", false, "Apply efficiency for Phi candidates"};
-    Configurable<bool> propagateEffError{"propagateEffError", false, "Propagate efficiency error"};
+    Configurable<bool> effErrorOffline{"effErrorOffline", false, "If true, the efficiency map uncertainty is not added per entry and must be propagated offline; if false, it is added in quadrature per entry"};
     Configurable<bool> perPeriodEfficiency{"perPeriodEfficiency", false, "Use per period efficiency maps"};
   } efficiencyConfigs;
 
@@ -529,7 +529,10 @@ struct PhiStrangeCorrelation {
       effTot *= eff;
 
       if (eff > 0.0f) {
-        float mapErr = efficiencyConfigs.propagateEffError ? err : 0.0f; // Optionally propagate error, otherwise treat as zero
+        // The map uncertainty is the same for every entry reading this map bin, i.e. fully correlated: summed in
+        // quadrature per entry it is underestimated by sqrt(N). The per-entry sum stays the default only until the
+        // offline propagation (effErrorOffline) is in place
+        float mapErr = efficiencyConfigs.effErrorOffline ? 0.0f : err;
         relErrSqSum += (mapErr / eff) * (mapErr / eff);
       }
     };
@@ -636,7 +639,7 @@ struct PhiStrangeCorrelation {
     // Error propagation in quadrature:
     // prevErr^2 : previous accumulated variance
     // (w * w)   : statistical fluctuation added by this specific particle count
-    // (wErr * wErr) : systematic uncertainty added by the efficiency map inaccuracy
+    // (wErr * wErr) : systematic uncertainty added by the efficiency map inaccuracy (zero with effErrorOffline)
     double newErr = std::sqrt(prevErr * prevErr + (w * w) + (wErr * wErr));
 
     // Update the histogram bin
@@ -670,7 +673,7 @@ struct PhiStrangeCorrelation {
     double newContent = prevContent + w;
 
     // Add the new variances to the accumulated variance
-    // (w * w) is the statistical term, (wErr * wErr) is the map uncertainty term
+    // (w * w) is the statistical term, (wErr * wErr) is the map uncertainty term (zero with effErrorOffline)
     double newErr2 = prevErr2 + (w * w) + (wErr * wErr);
 
     // Update the THnSparse bin
