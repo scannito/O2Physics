@@ -100,6 +100,7 @@ struct strangederivedbuilder {
     Produces<aod::StraStamps> strangeStamps;           // provides timestamps, run numbers
     Produces<aod::StraEvTimes> straEvTimes;            // provides event times (FT0, TOF)
     Produces<aod::V0CollRefs> v0collref;               // references collisions from V0s
+    Produces<aod::StraCollisionLink> strangeCollLink;  // references StraCollisions from AO2D collisions, for other tasks
     Produces<aod::CascCollRefs> casccollref;           // references collisions from cascades
     Produces<aod::KFCascCollRefs> kfcasccollref;       // references collisions from KF cascades
     Produces<aod::TraCascCollRefs> tracasccollref;     // references collisions from tracked cascades
@@ -265,6 +266,7 @@ struct strangederivedbuilder {
 
   // create collision indices beforehand
   std::vector<uint64_t> TrackGlobalBc;
+  std::vector<int> StraCollIndices;       // per AO2D collision; index -1: not written
   std::vector<int> V0CollIndices;         // index -1: no collision
   std::vector<int> CascadeCollIndices;    // index -1: no collision
   std::vector<int> KFCascadeCollIndices;  // index -1: no collision
@@ -553,12 +555,14 @@ struct strangederivedbuilder {
   {
     // create collision indices beforehand
     TrackGlobalBc.clear();
+    StraCollIndices.clear();
     V0CollIndices.clear();
     CascadeCollIndices.clear();
     KFCascadeCollIndices.clear();
     TraCascadeCollIndices.clear();
 
     TrackGlobalBc.resize(Tracks.size(), 0);
+    StraCollIndices.resize(collisions.size(), -1);        // index -1: not written
     V0CollIndices.resize(V0s.size(), -1);                 // index -1: no collision
     CascadeCollIndices.resize(Cascades.size(), -1);       // index -1: no collision
     KFCascadeCollIndices.resize(KFCascades.size(), -1);   // index -1: no collision
@@ -656,6 +660,7 @@ struct strangederivedbuilder {
       if (strange || fillEmptyCollisions) {
         products.strangeStamps(bc.runNumber(), bc.timestamp(), bc.globalBC());
         products.strangeColl(collision.posX(), collision.posY(), collision.posZ());
+        StraCollIndices[collision.globalIndex()] = products.strangeColl.lastIndex();
         if constexpr (requires { collision.mcCollisionId(); }) { // check if MC information is available and if so fill labels
           products.strangeCollLabels(collision.mcCollisionId());
         }
@@ -767,6 +772,9 @@ struct strangederivedbuilder {
 
     // +-<*>-+-<*>-+-<*>-+-<*>-+-<*>-+-<*>-+-<*>-+-<*>-+-<*>-+-<*>-+-<*>-+
     // populate references, including those that might not be assigned
+    for (const auto& collision : collisions) {
+      products.strangeCollLink(StraCollIndices[collision.globalIndex()]);
+    }
     for (const auto& v0 : V0s) {
       products.v0collref(V0CollIndices[v0.globalIndex()]);
     }

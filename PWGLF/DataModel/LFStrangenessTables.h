@@ -950,6 +950,12 @@ DECLARE_SOA_TABLE(V0Indices, "AOD", "V0INDEX", //! index table when using AO2Ds
 DECLARE_SOA_TABLE(V0CollRefs, "AOD", "V0COLLREF", //! optional table to refer back to a collision
                   o2::soa::Index<>, v0data::StraCollisionId);
 
+// Joinable with aod::Collisions: the StraCollisions row of each AO2D collision, -1 for a collision not written. For the
+// other tasks of a derivation train, which write tables of their own next to the strangeness ones (e.g. tracks) and
+// need to point them to the same collisions; not meant to be saved.
+DECLARE_SOA_TABLE(StraCollisionLink, "AOD", "STRACOLLLINK", //! AO2D collision -> StraCollisions
+                  o2::soa::Index<>, v0data::StraCollisionId);
+
 DECLARE_SOA_TABLE_STAGED(V0Extras, "V0EXTRA", //! optional table to refer to custom track extras
                          o2::soa::Index<>, v0data::PosTrackExtraId, v0data::NegTrackExtraId);
 
