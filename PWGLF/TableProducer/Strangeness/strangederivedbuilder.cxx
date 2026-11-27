@@ -318,7 +318,7 @@ struct strangederivedbuilder {
     }
     nSelected[o2::aod::straselections::kNoSameBunchPileup]++;
 
-    if (!cfgApplyRCTrequirement && !rctFlagsChecker(collision)) {
+    if (cfgApplyRCTrequirement && !rctFlagsChecker(collision)) {
       return false;
     }
     nSelected[o2::aod::straselections::kIsGoodRCT]++;

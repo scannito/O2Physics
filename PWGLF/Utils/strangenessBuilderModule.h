@@ -483,7 +483,7 @@ class BuilderModule
       return false;
     }
 
-    if (!eventSelectOpts.cfgApplyRCTrequirement && !rctFlagsChecker(collision)) {
+    if (eventSelectOpts.cfgApplyRCTrequirement && !rctFlagsChecker(collision)) {
       return false;
     }
 
